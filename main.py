@@ -9,13 +9,11 @@ from langchain_core.documents import Document
 from langchain import hub
 from typing_extensions import List, TypedDict
 from langgraph.graph import START, StateGraph
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from datetime import datetime
+import re
 
 load_dotenv()
-
-template = """Question: {question}
-Answer: Let's think step by step."""
-
-prompt = PromptTemplate(template=template, input_variables=["question"])
 
 llm = ChatOpenAI(
   openai_api_key=os.getenv("OPENROUTER_API_KEY"),
@@ -31,25 +29,53 @@ index = pc.Index(index_name)
 
 vector_store = PineconeVectorStore(embedding=embeddings, index=index)
 
-example_context_data = [
-    Document(
-        page_content="Today I worked on a new AI project. It involved building a personalized assistant.",
-        metadata={"user_id": "user_123", "timestamp": "2025-01-07T10:00:00Z", "chunk_index": 0}
-    ),
-    Document(
-        page_content="I went to lunch with a colleague and discussed machine learning trends.",
-        metadata={"user_id": "user_123", "timestamp": "2025-01-07T12:30:00Z", "chunk_index": 1}
-    ),
-    Document(
-        page_content="In the evening, I attended a networking event and met some interesting people in the AI industry.",
-        metadata={"user_id": "user_123", "timestamp": "2025-01-07T18:00:00Z", "chunk_index": 2}
-    )
-]
+def preprocess_context_data(raw_text: str, user_id: str) -> list:
+    """
+    Preprocess raw text into chunks and generate metadata for vector storage.
+    """
+    # Clean the text
+    def clean_text(text):
+        text = re.sub(r"[^a-zA-Z0-9.,!? ]+", "", text)  # Remove special characters
+        return re.sub(r"\s+", " ", text).strip()  # Remove extra spaces
 
-_ = vector_store.add_documents(documents=example_context_data)
+    cleaned_text = clean_text(raw_text)
 
-# Define prompt for question-answering
-prompt = hub.pull("rlm/rag-prompt")
+    # Chunk the text
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    chunks = text_splitter.split_text(cleaned_text)
+
+    # Create documents with metadata
+    timestamp = datetime.utcnow().isoformat()
+    documents = [
+        Document(
+            page_content=chunk,
+            metadata={"user_id": user_id, "timestamp": timestamp, "chunk_index": idx},
+        )
+        for idx, chunk in enumerate(chunks)
+    ]
+
+    return documents
+
+raw_text = input("Enter your context data: ")
+user_id = "user_123"
+processed_docs = preprocess_context_data(raw_text, user_id)
+_ = vector_store.add_documents(documents=processed_docs)
+
+
+template = """
+You are a helpful and insightful assistant with access to a user's personalized context. 
+Use the provided context and your knowledge to answer the following question accurately and thoughtfully.
+
+Context:
+{context}
+
+Question:
+{question}
+
+Answer:
+"""
+
+prompt = PromptTemplate(template=template, input_variables=["context", "question"])
 
 
 # Define state for application
@@ -61,9 +87,12 @@ class State(TypedDict):
 
 # Define application steps
 def retrieve(state: State):
-    retrieved_docs = vector_store.similarity_search(state["question"])
+    retrieved_docs = vector_store.similarity_search(
+        state["question"],
+        filter={"user_id": user_id}  # Filter by user_id
+    )
+    print("Retrieved documents:", retrieved_docs)
     return {"context": retrieved_docs}
-
 
 def generate(state: State):
     docs_content = "\n\n".join(doc.page_content for doc in state["context"])
@@ -76,5 +105,6 @@ graph_builder = StateGraph(State).add_sequence([retrieve, generate])
 graph_builder.add_edge(START, "retrieve")
 graph = graph_builder.compile()
 
-response = graph.invoke({"question": "In the evening, what did I do?"})
+question = input("What would you like to ask? ")
+response = graph.invoke({"question": question})
 print(response["answer"])
