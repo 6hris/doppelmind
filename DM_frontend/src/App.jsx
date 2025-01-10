@@ -9,9 +9,35 @@ function App() {
     { role: 'user', content: 'Just testing the layout!' }
   ])
 
-  const handleSaveEntry = () => {
-    // This will be connected to the backend later
-    console.log('Saving entry:', { username, journalEntry })
+  const handleSaveEntry = async () => {
+    if (!username || !journalEntry) {
+      alert('Please provide both username and journal entry');
+      return;
+    }
+
+    try {
+      const response = await fetch('http://127.0.0.1:8000/save-entry', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username: username,
+          entry: journalEntry,
+          timestamp: new Date().toISOString()
+        })
+      });
+
+      if (response.ok) {
+        alert('Journal entry saved successfully!');
+        setJournalEntry(''); // Clear the entry after saving
+      } else {
+        alert('Failed to save journal entry');
+      }
+    } catch (error) {
+      console.error('Error saving entry:', error);
+      alert('Error saving journal entry');
+    }
   }
 
   return (

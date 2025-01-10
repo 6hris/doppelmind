@@ -11,7 +11,37 @@ from typing_extensions import List, TypedDict
 from langgraph.graph import START, StateGraph
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from datetime import datetime
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from datetime import datetime
 import re
+
+app = FastAPI()
+
+# Enable CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # Your React app's URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class JournalEntry(BaseModel):
+    username: str
+    entry: str
+    timestamp: str
+
+@app.post("/save-entry")
+async def save_entry(entry: JournalEntry):
+    try:
+        # For now, just print to verify we're receiving the data
+        print(f"Received entry from {entry.username}: {entry.entry}")
+        return {"status": "success"}
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return {"status": "error", "message": str(e)}
 
 load_dotenv()
 
